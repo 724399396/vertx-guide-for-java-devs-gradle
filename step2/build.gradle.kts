@@ -11,8 +11,6 @@ val junitVersion = "5.3.2"
 
 dependencies {
   implementation("io.vertx:vertx-core:$vertxVersion")
-  
-  implementation("ch.qos.logback:logback-classic:1.2.3")
 
   implementation("io.vertx:vertx-web:$vertxVersion")
   implementation("io.vertx:vertx-web-templ-freemarker:$vertxVersion")
@@ -20,6 +18,8 @@ dependencies {
 
   implementation("io.vertx:vertx-jdbc-client:$vertxVersion")
   implementation("org.hsqldb:hsqldb:2.3.4")
+
+  implementation("ch.qos.logback:logback-classic:1.2.3")
 
   testImplementation("io.vertx:vertx-junit5:$vertxVersion")
   testImplementation("io.vertx:vertx-web-client:$vertxVersion")
