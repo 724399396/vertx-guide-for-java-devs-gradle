@@ -69,6 +69,10 @@ tasks {
     )
   }
 
+  clean {
+    delete("src/main/generated")
+  }
+
   test {
     useJUnitPlatform()
   }

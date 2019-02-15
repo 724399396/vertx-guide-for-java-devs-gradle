@@ -6,6 +6,7 @@ bin/
 *.iml
 db/
 generated/
+out/
 
 # Ignore VertX file cache
 .vertx/

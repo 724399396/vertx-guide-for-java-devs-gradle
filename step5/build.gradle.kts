@@ -26,6 +26,8 @@ dependencies {
   compileOnly("io.vertx:vertx-codegen:$vertxVersion")
   annotationProcessor("io.vertx:vertx-codegen:$vertxVersion:processor")
 
+  implementation("io.vertx:vertx-web-client:$vertxVersion")
+
   testImplementation("io.vertx:vertx-junit5:$vertxVersion")
   testImplementation("io.vertx:vertx-web-client:$vertxVersion")
   testImplementation("org.junit.jupiter:junit-jupiter-api:$junitVersion")
@@ -69,12 +71,12 @@ tasks {
     )
   }
 
-  clean {
-    delete("src/main/generated")
-  }
-
   test {
     useJUnitPlatform()
+  }
+
+  clean {
+    delete("src/main/generated")
   }
 
   getByName<JavaExec>("run") {
