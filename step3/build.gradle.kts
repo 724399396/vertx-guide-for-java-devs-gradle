@@ -24,6 +24,7 @@ dependencies {
 
   implementation("io.vertx:vertx-service-proxy:$vertxVersion")
   compileOnly("io.vertx:vertx-codegen:$vertxVersion")
+  annotationProcessor("io.vertx:vertx-codegen:$vertxVersion:processor")
 
   testImplementation("io.vertx:vertx-junit5:$vertxVersion")
   testImplementation("io.vertx:vertx-web-client:$vertxVersion")
@@ -46,7 +47,19 @@ val doOnChange = "${projectDir}/gradlew classes"
 logger.info(configurations.toString())
 
 tasks {
-  withType<JavaCompile> {
+  compileJava {
+    targetCompatibility = "1.8"
+    sourceCompatibility = "1.8"
+
+    dependsOn("codeGen")
+  }
+  
+  register("codeGen", JavaCompile::class) {
+    group = "build"
+    description = "generate vertx service code"
+    source = sourceSets.getByName("main").java
+    classpath = configurations.getByName("compileClasspath")
+    destinationDir = project.file("src/main/generated")
     options.annotationProcessorGeneratedSourcesDirectory = project.file("src/main/generated")
     options.annotationProcessorPath = configurations.getByName("compileClasspath")
     options.compilerArgs = listOf(
