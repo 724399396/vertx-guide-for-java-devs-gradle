@@ -20,7 +20,7 @@ public class WikiDatabaseService {
 
   public Single<JsonArray> rxFetchAllPages() {
     Future<JsonArray> future = Future.future();
-    wikiDatabaseServiceVertxEBProxy.fetchAllPages(future.completer());
+    wikiDatabaseServiceVertxEBProxy.fetchAllPages(future);
     return SingleHelper.toSingle(future::setHandler);
   }
 

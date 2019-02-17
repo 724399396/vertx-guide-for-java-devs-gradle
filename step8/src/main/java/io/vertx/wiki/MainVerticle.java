@@ -10,11 +10,10 @@ public class MainVerticle extends AbstractVerticle {
 
   @Override
   public void start(Future<Void> startFuture) throws Exception {
-    Single<String> dbVerticleDeployment = vertx.rxDeployVerticle(
-      "io.vertx.guides.wiki.database.WikiDatabaseVerticle");
-    dbVerticleDeployment
+    vertx.rxDeployVerticle("io.vertx.wiki.database.WikiDatabaseVerticle")
       .flatMap(id -> vertx.rxDeployVerticle("io.vertx.wiki.http.HttpServerVerticle",
-        new DeploymentOptions().setInstances(2))).flatMap(id -> vertx.rxDeployVerticle("io.vertx.wiki.http.AuthInitializerVerticle"))
+        new DeploymentOptions().setInstances(2)))
+      .flatMap(id -> vertx.rxDeployVerticle("io.vertx.wiki.http.AuthInitializerVerticle"))
       .subscribe(
         id -> startFuture.complete(),
         startFuture::fail

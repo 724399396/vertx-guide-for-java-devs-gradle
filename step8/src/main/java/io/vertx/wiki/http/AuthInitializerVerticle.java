@@ -13,6 +13,7 @@ import java.util.List;
 
 import static io.vertx.wiki.DatabaseConstants.*;
 
+@SuppressWarnings("Duplicates")
 public class AuthInitializerVerticle extends AbstractVerticle {
   private final Logger logger = LoggerFactory.getLogger(AuthInitializerVerticle.class);
 
