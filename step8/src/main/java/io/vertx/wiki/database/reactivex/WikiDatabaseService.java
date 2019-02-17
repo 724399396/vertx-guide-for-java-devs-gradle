@@ -1,9 +1,11 @@
 package io.vertx.wiki.database.reactivex;
 
+import io.reactivex.Completable;
 import io.reactivex.Single;
 import io.vertx.core.Future;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
+import io.vertx.reactivex.CompletableHelper;
 import io.vertx.reactivex.SingleHelper;
 import io.vertx.wiki.database.WikiDatabaseServiceVertxEBProxy;
 
@@ -28,22 +30,22 @@ public class WikiDatabaseService {
     return SingleHelper.toSingle(future::setHandler);
   }
 
-  public Single<Void> rxCreatePage(String title, String markdown) {
+  public Completable rxCreatePage(String title, String markdown) {
     Future<Void> future = Future.future();
     wikiDatabaseServiceVertxEBProxy.createPage(title, markdown, future.completer());
-    return SingleHelper.toSingle(future::setHandler);
+    return CompletableHelper.toCompletable(future::setHandler);
   }
 
-  public Single<Void> rxSavePage(int id, String markdown) {
+  public Completable rxSavePage(int id, String markdown) {
     Future<Void> future = Future.future();
     wikiDatabaseServiceVertxEBProxy.savePage(id, markdown, future.completer());
-    return SingleHelper.toSingle(future::setHandler);
+    return CompletableHelper.toCompletable(future::setHandler);
   }
 
-  public Single<Void> rxDeletePage(int id) {
+  public Completable rxDeletePage(int id) {
     Future<Void> future = Future.future();
     wikiDatabaseServiceVertxEBProxy.deletePage(id, future.completer());
-    return SingleHelper.toSingle(future::setHandler);
+    return CompletableHelper.toCompletable(future::setHandler);
   }
 
   public Single<List<JsonObject>> rxFetchAllPagesData() {

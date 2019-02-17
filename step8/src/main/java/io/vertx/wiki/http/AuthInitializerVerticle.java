@@ -1,12 +1,10 @@
 package io.vertx.wiki.http;
 
-import io.vertx.core.AbstractVerticle;
-import io.vertx.core.AsyncResult;
-import io.vertx.core.Handler;
+import io.reactivex.Completable;
 import io.vertx.core.json.JsonObject;
-import io.vertx.ext.jdbc.JDBCClient;
-import io.vertx.ext.sql.ResultSet;
-import io.vertx.ext.sql.SQLConnection;
+import io.vertx.reactivex.core.AbstractVerticle;
+import io.vertx.reactivex.ext.jdbc.JDBCClient;
+import io.vertx.reactivex.ext.sql.SQLClientHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,7 +12,6 @@ import java.util.Arrays;
 import java.util.List;
 
 import static io.vertx.wiki.DatabaseConstants.*;
-
 
 public class AuthInitializerVerticle extends AbstractVerticle {
   private final Logger logger = LoggerFactory.getLogger(AuthInitializerVerticle.class);
@@ -57,50 +54,23 @@ public class AuthInitializerVerticle extends AbstractVerticle {
       .put("driver_class", config().getString(CONFIG_WIKIDB_JDBC_DRIVER_CLASS, DEFAULT_WIKIDB_JDBC_DRIVER_CLASS))
       .put("max_pool_size", config().getInteger(CONFIG_WIKIDB_JDBC_MAX_POOL_SIZE, DEFAULT_JDBC_MAX_POOL_SIZE)));
 
-    dbClient.getConnection(car -> {
-      if (car.succeeded()) {
-        SQLConnection connection = car.result();
-        connection.batch(schemaCreation, ar -> schemaCreationHandler(dataInit, connection, ar));
-      } else {
-        logger.error("Cannot obtain a database connection", car.cause());
-      }
-    });
-  }
-
-  private void schemaCreationHandler(List<String> dataInit, SQLConnection connection, AsyncResult<List<Integer>> ar) {
-    if (ar.succeeded()) {
-      connection.query("select count(*) from user;", testQueryHandler(dataInit, connection));
-    } else {
-      connection.close();
-      logger.error("Schema creation failed", ar.cause());
-    }
-  }
-
-  private Handler<AsyncResult<ResultSet>> testQueryHandler(List<String> dataInit, SQLConnection connection) {
-    return ar -> {
-      if (ar.succeeded()) {
-        if (ar.result().getResults().get(0).getInteger(0) == 0) {
-          logger.info("Need to insert data");
-          connection.batch(dataInit, batchInsertHandler(connection));
-        } else {
-          logger.info("No need to insert data");
-          connection.close();
-        }
-      } else {
-        connection.close();
-        logger.error("Could not check the number of user in the database", ar.cause());
-      }
-    };
-  }
-
-  private Handler<AsyncResult<List<Integer>>> batchInsertHandler(SQLConnection connection) {
-    return ar -> {
-      if (ar.succeeded()) {
-        logger.info("Successfully insert data");
-      } else {
-        logger.error("Could not insert data", ar.cause());
-      }
-      connection.close();
-    };
+    SQLClientHelper.usingConnectionCompletable(dbClient, connection ->
+      connection.rxBatch(schemaCreation)
+        .flatMap(rs -> connection.rxQuery("select count(*) from user;"))
+        .flatMapCompletable(rs -> {
+          if (rs.getResults().get(0).getInteger(0) == 0) {
+            logger.info("Need to insert data");
+            return connection
+              .rxBatch(dataInit)
+              .ignoreElement();
+          } else {
+           logger.info("No need to insert data");
+           return Completable.complete();
+          }
+        })
+    ).subscribe(
+      () -> logger.info("Authentication database prepared"),
+      t -> logger.error("Could not prepare the authentication database")
+    );
   }
 }

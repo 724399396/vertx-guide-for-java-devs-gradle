@@ -15,7 +15,6 @@ import io.vertx.ext.jwt.JWTOptions;
 import io.vertx.ext.web.client.WebClientOptions;
 import io.vertx.reactivex.core.AbstractVerticle;
 import io.vertx.reactivex.core.http.HttpServer;
-import io.vertx.reactivex.ext.auth.User;
 import io.vertx.reactivex.ext.auth.jdbc.JDBCAuth;
 import io.vertx.reactivex.ext.auth.jwt.JWTAuth;
 import io.vertx.reactivex.ext.jdbc.JDBCClient;
@@ -26,7 +25,6 @@ import io.vertx.reactivex.ext.web.codec.BodyCodec;
 import io.vertx.reactivex.ext.web.handler.*;
 import io.vertx.reactivex.ext.web.sstore.LocalSessionStore;
 import io.vertx.reactivex.ext.web.templ.freemarker.FreeMarkerTemplateEngine;
-// end::rx-imports[]
 import io.vertx.wiki.database.reactivex.WikiDatabaseService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,6 +33,8 @@ import java.util.Arrays;
 import java.util.Date;
 
 import static io.vertx.wiki.DatabaseConstants.*;
+
+// end::rx-imports[]
 
 @SuppressWarnings("Duplicates")
 public class HttpServerVerticle extends AbstractVerticle {
@@ -151,22 +151,18 @@ public class HttpServerVerticle extends AbstractVerticle {
   }
 
   private void indexHandler(RoutingContext context) {
-    context.user().isAuthorized("create", res -> {
-      boolean canCreatePage = res.succeeded() && res.result();
-      dbService.rxFetchAllPages().flatMap((reply -> {
-          context.put("title", "Wiki home");
-          context.put("pages", reply.getList());
-          context.put("canCreatePage", canCreatePage);
-          context.put("username", context.user().principal().getString("username"));
-          templateEngine.render(context.data(), "templates/index.ftl", ar -> {
-            if (ar.succeeded()) {
-              context.response().putHeader("Content-Type", "text/html");
-              context.response().end(ar.result());
-            } else {
-              context.fail(ar.cause());
-            }
-          });
-      });
+    context.user().rxIsAuthorized("create")
+      .flatMap(canCreatePage -> {
+        context.put("canCreatePage", canCreatePage);
+        return dbService.rxFetchAllPages();
+      }).flatMap(result -> {
+      context.put("title", "Wiki home");
+      context.put("pages", result.getList());
+      context.put("username", context.user().principal().getString("username"));
+      return templateEngine.rxRender(context.data(), "templates/index.ftl");
+    }).subscribe(markup -> {
+      context.response().putHeader("Content-Type", "text/html");
+      context.response().end(markup);
     });
   }
 
@@ -304,100 +300,67 @@ public class HttpServerVerticle extends AbstractVerticle {
   }
 
   private void apiRoot(RoutingContext context) {
-    dbService.fetchAllPagesData(reply -> {
-      JsonObject response = new JsonObject();
-      if (reply.succeeded()) {
-        List<JsonObject> pages = reply.result()
-          .stream()
-          .map(obj -> new JsonObject()
-            .put("id", obj.getInteger("ID"))
-            .put("name", obj.getString("NAME")))
-          .collect(Collectors.toList());
-        response
-          .put("success", true)
-          .put("pages", pages);
-        context.response().setStatusCode(200);
-        context.response().putHeader("Content-Type", "application/json");
-        context.response().end(response.encode());
-      } else {
-        response
-          .put("success", false)
-          .put("error", reply.cause().getMessage());
-        context.response().setStatusCode(500);
-        context.response().putHeader("Content-Type", "application/json");
-        context.response().end(response.encode());
-      }
-    });
+    dbService.rxFetchAllPagesData()
+      .flatMapPublisher(Flowable::fromIterable)
+      .map(obj -> new JsonObject()
+        .put("id", obj.getInteger("ID"))
+        .put("name", obj.getString("NAME")))
+      .collect(JsonArray::new, JsonArray::add)
+      .subscribe(pages -> apiResponse(context, 200, "pages", pages), t -> apiFailure(context, t));
   }
 
   private void apiGetPage(RoutingContext context) {
     int id = Integer.valueOf(context.request().getParam("id"));
-    dbService.fetchPageById(id, reply -> {
-      JsonObject response = new JsonObject();
-      if (reply.succeeded()) {
-        JsonObject dbObject = reply.result();
+    dbService.rxFetchPageById(id)
+      .subscribe(dbObject -> {
         if (dbObject.getBoolean("found")) {
           JsonObject payload = new JsonObject()
             .put("name", dbObject.getString("name"))
             .put("id", dbObject.getInteger("id"))
             .put("markdown", dbObject.getString("content"))
             .put("html", Processor.process(dbObject.getString("content")));
-          response
-            .put("success", true)
-            .put("page", payload);
-          context.response().setStatusCode(200);
+          apiResponse(context, 200, "page", payload);
         } else {
-          context.response().setStatusCode(404);
-          response
-            .put("success", false)
-            .put("error", "There is no page with ID " + id);
+          apiFailure(context, 404, "There is no page with ID " + id);
         }
-      } else {
-        response
-          .put("success", false)
-          .put("error", reply.cause().getMessage());
-        context.response().setStatusCode(500);
-      }
-    });
+      }, t -> apiFailure(context, t));
   }
 
   private void apiCreatePage(RoutingContext context) {
-    JsonObject page = context.getBodyAsJson();
-    if (!validateJsonPageDocument(context, page, "name", "markdown")) {
-      return;
-    }
-    dbService.createPage(page.getString("name"), page.getString("markdown"), reply -> {
-      if (reply.succeeded()) {
-        context.response().setStatusCode(201);
-        context.response().putHeader("Content-Type", "application/json");
-        context.response().end(new JsonObject().put("success", true).encode());
-      } else {
-        context.response().setStatusCode(500);
-        context.response().putHeader("Content-Type", "application/json");
-        context.response().end(new JsonObject()
-          .put("success", false)
-          .put("error", reply.cause().getMessage()).encode());
+    if (context.user().principal().getBoolean("canCreate", false)) {
+      JsonObject page = context.getBodyAsJson();
+      if (!validateJsonPageDocument(context, page, "name", "markdown")) {
+        return;
       }
-    });
+      dbService.rxCreatePage(page.getString("name"), page.getString("markdown"))
+        .subscribe(() -> apiResponse(context, 201, null, null), t -> apiFailure(context, t));
+    } else {
+      context.fail(401);
+    }
+
   }
 
   private void apiUpdatePage(RoutingContext context) {
-    int id = Integer.valueOf(context.request().getParam("id"));
-    JsonObject page = context.getBodyAsJson();
-    if (!validateJsonPageDocument(context, page, "markdown")) {
-      return;
+    if (context.user().principal().getBoolean("canUpdate", false)) {
+      int id = Integer.valueOf(context.request().getParam("id"));
+      JsonObject page = context.getBodyAsJson();
+      if (!validateJsonPageDocument(context, page, "markdown")) {
+        return;
+      }
+      dbService.rxSavePage(id, page.getString("markdown"))
+        .subscribe(() -> apiResponse(context, 200, null, null),
+          t -> apiFailure(context, t));
+    } else {
+      context.fail(401);
     }
-    dbService.savePage(id, page.getString("markdown"), reply -> {
-      handleSimpleDbReply(context, reply);
-    });
+
   }
 
   private void apiDeletePage(RoutingContext context) {
     if (context.user().principal().getBoolean("canDelete", false)) {
       int id = Integer.valueOf(context.request().getParam("id"));
-      dbService.deletePage(id, reply -> {
-        handleSimpleDbReply(context, reply);
-      });
+      dbService.rxDeletePage(id)
+        .subscribe(() -> apiResponse(context, 200, null, null), t -> apiFailure(context, t));
     } else {
       context.fail(401);
     }
@@ -440,5 +403,33 @@ public class HttpServerVerticle extends AbstractVerticle {
         context.fail(ar.cause());
       }
     });
+  }
+
+  private void apiResponse(RoutingContext context, int statusCode, String jsonField, Object jsonData) {
+    context.response().setStatusCode(statusCode);
+    context.response().putHeader("Content-Type", "application/json");
+    JsonObject wrapper = new JsonObject().put("success", true);
+    if (jsonField != null && jsonData != null) {
+      wrapper.put(jsonField, jsonData);
+    }
+    context.response().end(wrapper.encode());
+  }
+
+  private void apiFailure(RoutingContext context, Throwable t) {
+    apiFailure(context, 500, t.getMessage());
+  }
+
+  private void apiFailure(RoutingContext context, int statusCode, String error) {
+    context.response().setStatusCode(statusCode);
+    context.response().putHeader("Content-Type", "application/json");
+    context.response().end(new JsonObject()
+      .put("success", false)
+      .put("error", error).encode());
+  }
+
+  private static final class UnauthorizedThrowable extends Throwable {
+    UnauthorizedThrowable(String message) {
+      super(message, null, false, false);
+    }
   }
 }
