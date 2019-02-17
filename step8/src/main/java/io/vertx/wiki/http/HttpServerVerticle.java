@@ -15,6 +15,7 @@ import io.vertx.ext.jwt.JWTOptions;
 import io.vertx.ext.web.client.WebClientOptions;
 import io.vertx.reactivex.core.AbstractVerticle;
 import io.vertx.reactivex.core.http.HttpServer;
+import io.vertx.reactivex.ext.auth.User;
 import io.vertx.reactivex.ext.auth.jdbc.JDBCAuth;
 import io.vertx.reactivex.ext.auth.jwt.JWTAuth;
 import io.vertx.reactivex.ext.jdbc.JDBCClient;
@@ -172,41 +173,43 @@ public class HttpServerVerticle extends AbstractVerticle {
       "Feel-free to write in Markdown!\n";
 
   private void pageRenderingHandler(RoutingContext context) {
-    String requestedPage = context.request().getParam("page");
+    User user = context.user();
+    user.rxIsAuthorized("update")
+      .flatMap(canSavePage -> {
+        context.put("canSavePage", canSavePage);
+        return user.rxIsAuthorized("delete");
+      }).flatMap(canDeletePage -> {
+      context.put("canDeletePage", canDeletePage);
+      String requestedPage = context.request().getParam("page");
+      context.put("title", requestedPage);
+      return dbService.rxFetchPage(requestedPage);
+    }).flatMap(payLoad -> {
 
-    dbService.fetchPage(requestedPage, reply -> {
-      if (reply.succeeded()) {
-        JsonObject palyLoad = reply.result();
-        boolean found = palyLoad.getBoolean("found");
-        String rawContent = palyLoad.getString("rawContent", EMPTY_PAGE_MARKDOWN);
-        context.put("title", requestedPage);
-        context.put("id", palyLoad.getInteger("id", -1));
-        context.put("newPage", found ? "no" : "yes");
-        context.put("rawContent", rawContent);
-        context.put("content", Processor.process(rawContent));
-        context.put("timestamp", new Date().toString());
-
-        templateEngine.render(context.data(), "templates/page.ftl", ar -> {
-          if (ar.succeeded()) {
-            context.response().putHeader("Content-Type", "text/html");
-            context.response().end(ar.result());
-          } else {
-            context.fail(ar.cause());
-          }
-        });
-      } else {
-        context.fail(reply.cause());
-      }
-    });
+      boolean found = payLoad.getBoolean("found");
+      String rawContent = payLoad.getString("rawContent", EMPTY_PAGE_MARKDOWN);
+      context.put("id", payLoad.getInteger("id", -1));
+      context.put("newPage", found ? "no" : "yes");
+      context.put("rawContent", rawContent);
+      context.put("content", Processor.process(rawContent));
+      context.put("timestamp", new Date().toString());
+      context.put("username", user.principal().getString("username"));
+      return templateEngine.rxRender(context.data(), "templates/page.ftl");
+    }).subscribe(
+      markup -> {
+        context.response().putHeader("Content-Type", "text/html");
+        context.response().end(markup);
+      },
+      context::fail
+    );
   }
 
   private void pageUpdateHandler(RoutingContext context) {
     String title = context.request().getParam("title");
 
-    boolean pageCreateion = "yes".equals(context.request().getParam("newPage"));
+    boolean pageCreation = "yes".equals(context.request().getParam("newPage"));
     String markdown = context.request().getParam("markdown");
-    checkAuthorised(context, pageCreateion ? "create" : "update")
-      .andThen(pageCreateion ? dbService.rxCreatePage(title, markdown) : dbService.rxSavePage(Integer.valueOf(context.request().getParam("id")), markdown))
+    checkAuthorised(context, pageCreation ? "create" : "update")
+      .andThen(pageCreation ? dbService.rxCreatePage(title, markdown) : dbService.rxSavePage(Integer.valueOf(context.request().getParam("id")), markdown))
       .subscribe(() -> {
         context.response().setStatusCode(303);
         context.response().putHeader("Location", "/wiki/" + title);
@@ -232,71 +235,55 @@ public class HttpServerVerticle extends AbstractVerticle {
   }
 
   private void pageDeletionHandler(RoutingContext context) {
-    context.user().isAuthorized("delete", res -> {
-      if (res.succeeded() && res.result()) {
-        dbService.deletePage(Integer.parseInt(context.request().getParam("id")), reply -> {
-          if (reply.succeeded()) {
-            context.response().setStatusCode(303);
-            context.response().putHeader("Location", "/");
-            context.response().end();
-          } else {
-            context.fail(reply.cause());
-          }
-        });
-      } else {
-        context.response().setStatusCode(403).end();
-      }
-    });
+    checkAuthorised(context, "delete")
+      .andThen(dbService.rxDeletePage(Integer.parseInt(context.request().getParam("id"))))
+      .subscribe(() -> {
+        context.response().setStatusCode(303);
+        context.response().putHeader("Location", "/");
+        context.response().end();
+      }, t -> onError(context, t));
   }
 
   private void backupHandler(RoutingContext context) {
-    dbService.fetchAllPagesData(reply -> {
-      if (reply.succeeded()) {
+    checkAuthorised(context, "role:writer")
+      .andThen(dbService.rxFetchAllPagesData())
+      .map(pages -> {
         JsonArray filesObject = new JsonArray();
         JsonObject payload = new JsonObject()
           .put("files", filesObject)
           .put("language", "plaintext")
           .put("title", "vertx-wiki-backup")
           .put("public", true);
-        reply
-          .result()
-          .forEach(page -> {
-            JsonObject fileObject = new JsonObject();
-            fileObject.put("name", page.getString("NAME"));
-            fileObject.put("content", page.getString("CONTENT"));
-            filesObject.add(fileObject);
-          });
-        webClient.post(443, "snippets.glot.io", "/snippets")
-          .putHeader("Content-Type", "application/json")
-          .as(BodyCodec.jsonObject())
-          .sendJsonObject(payload, ar -> {
-            if (ar.succeeded()) {
-              HttpResponse<JsonObject> response = ar.result();
-              if (response.statusCode() == 200) {
-                String url = "https://glot.io/snippets/" + response.body().getString("id");
-                context.put("backup_gist_url", url);
-                indexHandler(context);
-              } else {
-                StringBuilder message = new StringBuilder()
-                  .append("Could not backup the wiki:")
-                  .append(response.statusMessage());
-                JsonObject body = response.body();
-                if (body != null) {
-                  message.append(System.getProperty("line.separator"))
-                    .append(body.encodePrettily());
-                }
-                LOGGER.error(message.toString());
-                context.fail(502);
-              }
-            } else {
-              LOGGER.error("HTTP Client error", ar.cause());
-              context.fail(ar.cause());
-            }
-          });
-      } else {
-        context.fail(reply.cause());
-      }
-    });
+        pages.forEach(page -> {
+          JsonObject fileObject = new JsonObject();
+          fileObject.put("name", page.getString("NAME"));
+          fileObject.put("content", page.getString("CONTENT"));
+          filesObject.add(fileObject);
+        });
+        return payload;
+      }).flatMap(body ->
+      webClient.post(443, "snippets.glot.io", "/snippets")
+        .putHeader("Content-Type", "application/json")
+        .as(BodyCodec.jsonObject())
+        .rxSendJsonObject(body))
+      .subscribe(response -> {
+        if (response.statusCode() == 200) {
+          String url = "https://glot.io/snippets/" + response.body().getString("id");
+          context.put("backup_gist_url", url);
+          indexHandler(context);
+        } else {
+          StringBuilder message = new StringBuilder()
+            .append("Could not backup the wiki:")
+            .append(response.statusMessage());
+          JsonObject body = response.body();
+          if (body != null) {
+            message.append(System.getProperty("line.separator"))
+              .append(body.encodePrettily());
+          }
+          LOGGER.error(message.toString());
+          context.fail(502);
+        }
+      }, t -> onError(context, t));
   }
 
   private void apiRoot(RoutingContext context) {
@@ -379,30 +366,13 @@ public class HttpServerVerticle extends AbstractVerticle {
     return true;
   }
 
-  private void handleSimpleDbReply(RoutingContext context, AsyncResult<Void> reply) {
-    if (reply.succeeded()) {
-      context.response().setStatusCode(200);
-      context.response().putHeader("Content-Type", "application/json");
-      context.response().end(new JsonObject().put("success", true).encode());
-    } else {
-      context.response().setStatusCode(500);
-      context.response().putHeader("Content-Type", "application/json");
-      context.response().end(new JsonObject()
-        .put("success", false)
-        .put("error", reply.cause().getMessage()).encode());
-    }
-  }
-
   private void loginHandler(RoutingContext context) {
     context.put("title", "Login");
-    templateEngine.render(context.data(), "templates/login.ftl", ar -> {
-      if (ar.succeeded()) {
+    templateEngine.rxRender(context.data(), "templates/login.ftl")
+      .subscribe(markup -> {
         context.response().putHeader("Content-Type", "text/html");
-        context.response().end(ar.result());
-      } else {
-        context.fail(ar.cause());
-      }
-    });
+        context.response().end(markup);
+      }, context::fail);
   }
 
   private void apiResponse(RoutingContext context, int statusCode, String jsonField, Object jsonData) {
@@ -425,6 +395,14 @@ public class HttpServerVerticle extends AbstractVerticle {
     context.response().end(new JsonObject()
       .put("success", false)
       .put("error", error).encode());
+  }
+
+  private void onError(RoutingContext context, Throwable t) {
+    if (t instanceof HttpServerVerticle.UnauthorizedThrowable) {
+      context.fail(403);
+    } else {
+      context.fail(t);
+    }
   }
 
   private static final class UnauthorizedThrowable extends Throwable {

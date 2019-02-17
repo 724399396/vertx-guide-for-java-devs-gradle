@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @ExtendWith(VertxExtension.class)
 class WikiDatabaseVerticleTest {
-  private WikiDatabaseService service;
+  private io.vertx.wiki.database.reactivex.WikiDatabaseService service;
 
   @BeforeEach
   public void prepare(Vertx vertx, VertxTestContext vertxTestContext) {
@@ -26,7 +26,7 @@ class WikiDatabaseVerticleTest {
 
     vertx.deployVerticle(new WikiDatabaseVerticle(), new DeploymentOptions().setConfig(conf), vertxTestContext.succeeding(
       id -> {
-        service = WikiDatabaseService.createProxy(vertx, WikiDatabaseVerticle.CONFIG_WIKIDB_QUEUE);
+        service = io.vertx.wiki.database.WikiDatabaseService.createProxy(vertx, WikiDatabaseVerticle.CONFIG_WIKIDB_QUEUE);
         vertxTestContext.completeNow();
       }
     ));
@@ -34,50 +34,54 @@ class WikiDatabaseVerticleTest {
 
   @Test
   public void crud_operations(VertxTestContext testContext) {
-    service.createPage("Test", "Some content", testContext.succeeding(v1 -> {
-      service.fetchPage("Test", testContext.succeeding(json1 -> testContext.verify(() -> {
-        assertTrue(json1.getBoolean("found"));
-        assertTrue(json1.containsKey("id"));
-        assertEquals("Some content", json1.getString("rawContent"));
+    service.rxCreatePage("Test", "Some content")
+      .andThen(service.rxFetchPage("Test"))
+      .flatMap(json1 -> {
+        testContext.verify(() -> {
+          assertTrue(json1.getBoolean("found"));
+          assertTrue(json1.containsKey("id"));
+          assertEquals("Some content", json1.getString("rawContent"));
+        });
 
-        service.savePage(json1.getInteger("id"), "Yo!", testContext.succeeding(v2 -> {
-          service.fetchAllPages(testContext.succeeding(array1 -> testContext.verify(() -> {
-            assertEquals(1, array1.size());
-            service.fetchPage("Test", testContext.succeeding(json2 -> testContext.verify(() -> {
-                assertEquals("Yo!", json2.getString("rawContent"));
-                service.deletePage(json1.getInteger("id"), v3 -> {
-                  service.fetchAllPages(testContext.succeeding(array2 -> {
-                    assertTrue(array2.isEmpty());
-                    testContext.completeNow();
-                  }));
+        return service.rxSavePage(json1.getInteger("id"), "Yo!")
+          .andThen(service.rxFetchAllPages())
+          .flatMap(array1 -> {
+            testContext.verify(() -> {
+              assertEquals(1, array1.size());
+            });
+            return service.rxFetchPage("Test")
+              .flatMap(json2 -> {
+                testContext.verify(() -> {
+                  assertEquals("Yo!", json2.getString("rawContent"));
                 });
-              })
-            ));
-          })));
-        }));
-      })));
-    }));
+                return service.rxDeletePage(json1.getInteger("id"))
+                  .andThen(service.rxFetchAllPages());
+              });
+          });
+      }).subscribe(array2 -> {
+      assertTrue(array2.isEmpty());
+      testContext.completeNow();
+    }, testContext::failNow);
   }
 
   @Test
   public void test_fetchAllPagesData(VertxTestContext testContext) {
-    service.createPage("A", "abc", testContext.succeeding(p1 -> {
-      service.createPage("B", "123", testContext.succeeding(p2 -> {
-        service.fetchAllPagesData(testContext.succeeding(data -> {
-            testContext.verify(() -> {
-              assertEquals(2, data.size());
+    service.rxCreatePage("A", "abc")
+      .andThen(service.rxCreatePage("B", "123"))
+      .andThen(service.rxFetchAllPagesData())
+      .subscribe(data -> {
+        testContext.verify(() -> {
+          assertEquals(2, data.size());
 
-              JsonObject a = data.get(0);
-              assertEquals("A", a.getString("NAME"));
-              assertEquals("abc", a.getString("CONTENT"));
+          JsonObject a = data.get(0);
+          assertEquals("A", a.getString("NAME"));
+          assertEquals("abc", a.getString("CONTENT"));
 
-              JsonObject b = data.get(1);
-              assertEquals("B", b.getString("NAME"));
-              assertEquals("123", b.getString("CONTENT"));
-              testContext.completeNow();
-            });
-        }));
-      }));
-    }));
+          JsonObject b = data.get(1);
+          assertEquals("B", b.getString("NAME"));
+          assertEquals("123", b.getString("CONTENT"));
+          testContext.completeNow();
+        });
+      }, testContext::failNow);
   }
 }
