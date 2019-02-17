@@ -9,6 +9,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import static io.vertx.wiki.DatabaseConstants.CONFIG_WIKIDB_JDBC_MAX_POOL_SIZE;
+import static io.vertx.wiki.DatabaseConstants.CONFIG_WIKIDB_JDBC_URL;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -19,8 +21,8 @@ class WikiDatabaseVerticleTest {
   @BeforeEach
   public void prepare(Vertx vertx, VertxTestContext vertxTestContext) {
     JsonObject conf = new JsonObject()
-      .put(WikiDatabaseVerticle.CONFIG_WIKIDB_JDBC_URL, "jdbc:hsqldb:mem:testdb;shutdown=true")
-      .put(WikiDatabaseVerticle.CONFIG_WIKIDB_JDBC_MAX_POOL_SIZE, 4);
+      .put(CONFIG_WIKIDB_JDBC_URL, "jdbc:hsqldb:mem:testdb;shutdown=true")
+      .put(CONFIG_WIKIDB_JDBC_MAX_POOL_SIZE, 4);
 
     vertx.deployVerticle(new WikiDatabaseVerticle(), new DeploymentOptions().setConfig(conf), vertxTestContext.succeeding(
       id -> {

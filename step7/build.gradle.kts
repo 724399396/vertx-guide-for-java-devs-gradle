@@ -29,6 +29,7 @@ dependencies {
   implementation("io.vertx:vertx-web-client:$vertxVersion")
 
   implementation("io.vertx:vertx-auth-jdbc:$vertxVersion")
+  implementation("io.vertx:vertx-auth-jwt:$vertxVersion")
 
   testImplementation("io.vertx:vertx-junit5:$vertxVersion")
   testImplementation("io.vertx:vertx-web-client:$vertxVersion")
