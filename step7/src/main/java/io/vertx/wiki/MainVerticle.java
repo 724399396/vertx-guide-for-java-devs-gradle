@@ -5,12 +5,9 @@ import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Future;
 import io.vertx.wiki.database.WikiDatabaseVerticle;
 import io.vertx.wiki.http.AuthInitializerVerticle;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @SuppressWarnings("Duplicates")
 public class MainVerticle extends AbstractVerticle {
-  public static final Logger LOGGER = LoggerFactory.getLogger(MainVerticle.class);
 
   @Override
   public void start(Future<Void> startFuture) throws Exception {
